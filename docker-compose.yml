@@ -1,0 +1,293 @@
+# ══════════════════════════════════════════════════════════════════════════
+# G4Lite — Production Docker Compose
+#
+# Usage:
+#   docker compose up -d --build          Start core services
+#   docker compose --profile ai up -d     Start with Ollama AI assistant
+#   docker compose down --remove-orphans  Stop and clean up
+#   docker compose logs backend -f        Stream backend logs
+#
+# All secrets and configuration via .env file (see .env.example).
+# ══════════════════════════════════════════════════════════════════════════
+
+name: G4Lite
+
+services:
+
+  # ────────────────────────────────────────────────────────────────────────
+  # PostgreSQL 15 — primary data store
+  # ────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: G4Lite-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-G4Lite}
+      POSTGRES_USER:     ${POSTGRES_USER:-g4admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      # Performance tuning via PG env vars
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+    # Production: do NOT expose 5432 to host — only backend needs it.
+    # Uncomment for local debugging with pgcli/psql/DBeaver:
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+
+    networks:
+      - G4Lite-internal
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-g4admin} -d ${POSTGRES_DB:-G4Lite}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    # Resource limits — prevent runaway queries from consuming the host
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+    command:
+      - "postgres"
+      # ── Connection settings ──
+      - "-c" 
+      - "max_connections=100"
+      # ── Memory (tuned for 512MB container) ──
+      - "-c"
+      - "shared_buffers=128MB"
+      - "-c"
+      - "effective_cache_size=256MB"
+      - "-c"
+      - "work_mem=4MB"
+      - "-c"
+      - "maintenance_work_mem=64MB"
+      # ── WAL / durability ──
+      - "-c"
+      - "wal_buffers=4MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      # ── Logging ──
+      - "-c"
+      - "log_min_duration_statement=500"
+      - "-c"
+      - "log_connections=on"
+      - "-c"
+      - "log_disconnections=on"
+      - "-c"
+      - "log_lock_waits=on"
+      # ── Locale ──
+      - "-c"
+      - "timezone=UTC"
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Backend — FastAPI application
+  # ────────────────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: G4Lite-backend
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    env_file: .env
+
+    environment:
+      # Override host to use Docker service name
+      POSTGRES_HOST: postgres
+      OLLAMA_BASE_URL: http://ollama:11434
+      # Ensure we get structured logs in production
+      LOG_FORMAT: json
+
+    # Production: backend is only accessible via nginx reverse proxy.
+    # Do NOT expose 8000 to host.
+    # Uncomment for direct API debugging:
+    # ports:
+    #   - "127.0.0.1:8000:8000"
+
+    networks:
+      - G4Lite-internal
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--max-time", "5",
+          "http://localhost:8000/api/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Nginx — reverse proxy, static file server, TLS termination point
+  # ────────────────────────────────────────────────────────────────────────
+  nginx:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: G4Lite-nginx
+    restart: unless-stopped
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    ports:
+      - "${LISTEN_PORT:-80}:80"
+      # Uncomment for TLS:
+      # - "${LISTEN_PORT_TLS:-443}:443"
+
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Uncomment for TLS certificates:
+      # - ./nginx/certs:/etc/nginx/certs:ro
+
+    networks:
+      - G4Lite-internal
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+        reservations:
+          memory: 32M
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Ollama — local LLM runtime (optional, activate with --profile ai)
+  #
+  # Start:    docker compose --profile ai up -d
+  # Pull:     docker compose exec ollama ollama pull mistral
+  # Test:     curl http://localhost:11434/api/tags
+  # ────────────────────────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: G4Lite-ollama
+    restart: unless-stopped
+    profiles:
+      - ai
+
+    volumes:
+      - ollama_data:/root/.ollama
+
+    # Expose to host for model management via CLI
+    ports:
+      - "127.0.0.1:11434:11434"
+
+    networks:
+      - G4Lite-internal
+
+    environment:
+      # Number of parallel request slots (default 1)
+      OLLAMA_NUM_PARALLEL: "2"
+      # Keep model loaded for 10 minutes of inactivity
+      OLLAMA_KEEP_ALIVE: "10m"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Ollama GPU variant — for hosts with NVIDIA GPUs
+  #
+  # Start:    docker compose --profile ai-gpu up -d
+  # Requires: nvidia-container-toolkit installed on host
+  # ────────────────────────────────────────────────────────────────────────
+  ollama-gpu:
+    image: ollama/ollama:latest
+    container_name: G4Lite-ollama-gpu
+    restart: unless-stopped
+    profiles:
+      - ai-gpu
+
+    volumes:
+      - ollama_data:/root/.ollama
+
+    ports:
+      - "127.0.0.1:11434:11434"
+
+    networks:
+      - G4Lite-internal
+
+    environment:
+      OLLAMA_NUM_PARALLEL: "4"
+      OLLAMA_KEEP_ALIVE: "10m"
+      NVIDIA_VISIBLE_DEVICES: "all"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+# ──────────────────────────────────────────────────────────────────────────
+# Networks
+# ──────────────────────────────────────────────────────────────────────────
+networks:
+  G4Lite-internal:
+    name: G4Lite-internal
+    driver: bridge
+    # Internal network — containers can talk to each other but the
+    # network itself is not directly routable from the host.  Only
+    # nginx's published ports are accessible externally.
+
+# ──────────────────────────────────────────────────────────────────────────
+# Volumes
+# ──────────────────────────────────────────────────────────────────────────
+volumes:
+  pgdata:
+    name: G4Lite-pgdata
+  ollama_data:
+    name: G4Lite-ollama-data

@@ -1,0 +1,191 @@
+# ══════════════════════════════════════════════════════════════════════════
+# G4Lite — Development Overrides
+#
+# Layered on top of docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Or set in .env / shell:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
+#   docker compose up -d --build
+#
+# What changes from production:
+#   - Postgres port exposed to host (pgcli / DBeaver access)
+#   - Backend runs with --reload and source mounted as volume
+#   - Backend port exposed to host (direct API testing)
+#   - Frontend runs Vite dev server with HMR (not Nginx-served build)
+#   - Nginx uses dev config that proxies to Vite dev server
+#   - All services bind to 127.0.0.1 only
+#   - Ollama port exposed for model management
+#   - Resource limits relaxed
+# ══════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ────────────────────────────────────────────────────────────────────────
+  # PostgreSQL — expose to host for direct access
+  # ────────────────────────────────────────────────────────────────────────
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+    # Relaxed logging in dev — log all queries over 100ms
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=100"
+      - "-c"
+      - "shared_buffers=128MB"
+      - "-c"
+      - "effective_cache_size=256MB"
+      - "-c"
+      - "work_mem=4MB"
+      - "-c"
+      - "maintenance_work_mem=64MB"
+      - "-c"
+      - "log_min_duration_statement=100"
+      - "-c"
+      - "log_connections=on"
+      - "-c"
+      - "log_disconnections=on"
+      - "-c"
+      - "log_lock_waits=on"
+      - "-c"
+      - "log_statement=ddl"
+      - "-c"
+      - "timezone=UTC"
+
+    # No resource limits in dev
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Backend — hot-reload with source mount
+  # ────────────────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      # Use a dev-friendly target if multi-stage; otherwise full build
+      # with source overridden by volume mount below.
+
+    # Override CMD with reload-enabled uvicorn
+    command:
+      [
+        "uvicorn", "app.main:app",
+        "--host", "0.0.0.0",
+        "--port", "8000",
+        "--reload",
+        "--reload-dir", "/app/app",
+        "--log-level", "debug",
+      ]
+
+    volumes:
+      # Mount source code for hot-reload — changes on host are
+      # reflected immediately without rebuilding the container.
+      - ./backend/app:/app/app:cached
+      - ./backend/alembic:/app/alembic:cached
+      - ./backend/alembic.ini:/app/alembic.ini:ro
+
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    environment:
+      POSTGRES_HOST: postgres
+      OLLAMA_BASE_URL: http://ollama:11434
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: text
+      DB_ECHO: "false"
+      SEED_ON_STARTUP: "true"
+
+    # Faster health check cadence in dev
+    healthcheck:
+      interval: 10s
+      start_period: 10s
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Frontend — Vite dev server with HMR
+  # ────────────────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+
+    command:
+      [
+        "npm", "run", "dev",
+        "--", "--host", "0.0.0.0", "--port", "5173",
+      ]
+
+    volumes:
+      # Mount source for HMR — node_modules stays in container
+      - ./frontend/src:/app/src:cached
+      - ./frontend/public:/app/public:cached
+      - ./frontend/index.html:/app/index.html:cached
+      - ./frontend/vite.config.ts:/app/vite.config.ts:ro
+      - ./frontend/tsconfig.json:/app/tsconfig.json:ro
+      - ./frontend/tsconfig.node.json:/app/tsconfig.node.json:ro
+      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts:ro
+      - ./frontend/postcss.config.js:/app/postcss.config.js:ro
+
+    ports:
+      - "127.0.0.1:5173:5173"
+
+    environment:
+      VITE_API_URL: http://localhost:8000
+      # Vite HMR needs to know the host for WebSocket connection
+      VITE_HMR_HOST: localhost
+      VITE_HMR_PORT: "5173"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:5173 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Nginx — dev config proxying to Vite dev server
+  # ────────────────────────────────────────────────────────────────────────
+  nginx:
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+
+    ports:
+      - "127.0.0.1:80:80"
+
+    # Relax health check — Vite may take a moment to boot
+    healthcheck:
+      start_period: 20s
+
+  # ────────────────────────────────────────────────────────────────────────
+  # Ollama — expose port to host for model management in dev
+  # ────────────────────────────────────────────────────────────────────────
+  ollama:
+    ports:
+      - "127.0.0.1:11434:11434"
+
+    # Lower memory reservation in dev
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 512M
+
+  ollama-gpu:
+    ports:
+      - "127.0.0.1:11434:11434"

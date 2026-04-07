@@ -1,0 +1,34 @@
+# ══════════════════════════════════════════════════════════════════════════
+# G4Lite Backend — Python Dependencies
+#
+# All versions pinned for reproducible builds.
+# Update with:  pip-compile requirements.in → requirements.txt
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── Core Framework ───────────────────────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-multipart==0.0.20
+
+# ── Database ─────────────────────────────────────────────────────────────
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.1
+
+# ── Authentication & Security ────────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+
+# ── HTTP Client (Ollama, external services) ──────────────────────────────
+httpx==0.28.1
+
+# ── PDF Export (resupply demand forms) ───────────────────────────────────
+weasyprint==63.1
+
+# ── Async Utilities ──────────────────────────────────────────────────────
+# Required by alembic/env.py when running inside an existing event loop
+# (e.g. pytest-asyncio fixtures)
+nest-asyncio==1.6.0

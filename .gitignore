@@ -1,0 +1,65 @@
+# ─── Secrets & Environment ──────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+*.secret
+
+# ─── Python ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ─── Node / Frontend ────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/build/
+*.tsbuildinfo
+.vite/
+
+# ─── IDE & OS ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Docker ─────────────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ─── Logs ───────────────────────────────────────────────────────────
+*.log
+logs/
+backend/logs/
+
+# ─── Database ───────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+pgdata/
+
+# ─── Coverage / Testing ─────────────────────────────────────────────
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# ─── Build artifacts & temp ────────────────────────────────────────
+*.bak
+*.tmp
+openapi.json
+fixed-frontend/
