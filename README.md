@@ -149,6 +149,171 @@ docker compose exec backend python -m app.seed
 
 ---
 
+## Frontend (Phase 3 — Operational UI)
+
+The frontend was completely rewritten in Phase 3 to align with the expanded 100-endpoint backend and the G4Lite UI/UX Design System. It is designed to feel like a piece of operational equipment, not a SaaS dashboard.
+
+### Design Philosophy
+
+- **Bloomberg Terminal discipline** meets **Linear.app refinement**
+- **Monochromatic dark surfaces** — near-black `#080A0F` base, true-black surfaces, hairline borders
+- **Single configurable accent colour** (default `#3B82F6`) used surgically for interactive elements only
+- **Monospace font** (JetBrains Mono) for every numeric value, ID, date, and quantity — instant visual distinction between labels and data
+- **No gradients, no shadows on dark surfaces, no decorative illustration** — every pixel earns its place
+- **Loading, empty, and error states handled on every component** — never a blank screen
+- **Air-gap ready** — Montserrat and JetBrains Mono fonts self-hosted, no CDN dependencies
+
+### Frontend Tech Stack
+
+| Component | Technology |
+|---|---|
+| Framework | React 18 + Vite 6 |
+| Language | TypeScript (strict mode) |
+| UI Library | MUI v5 |
+| Styling | Tailwind CSS (layout/spacing only — colours via MUI theme) |
+| State | Zustand (with persistence) |
+| Data Fetching | TanStack Query v5 |
+| Forms | React Hook Form + Zod |
+| Routing | React Router v6 |
+| Charts | Recharts |
+| Notifications | notistack |
+| Icons | MUI Icons (Outlined variant only) |
+| Fonts | Montserrat + JetBrains Mono (self-hosted) |
+
+### Phase 3A — Foundation
+
+The foundation layer was built first to give every subsequent component a single source of truth for visual primitives, types, and theme.
+
+**Design tokens (`src/tokens.ts`)** — 19 categories of design primitives in a single typed const:
+- Surface elevation ladder (8 steps from `base` to `borderMax`)
+- Text colour hierarchy (6 levels including `quartery` ghost text)
+- Configurable accent colour with 7 shade variants
+- Status colours (success/warning/danger/info) each with full/muted/subtle/border variants
+- Criticality, priority, and condition semantic colour maps
+- Typography scale (12 font sizes, 5 weights, 6 line heights, 9 letter spacings)
+- Base-4 spacing scale, layout dimensions, breakpoints
+- Border radius, border widths, z-index ladder, shadow scale
+- Motion (durations, easings), opacity scale, icon sizes
+- Charts palette, scrollbar dimensions, focus ring config
+- Helper functions (`getCriticalityConfig`, `getPriorityConfig`, `getConditionConfig`)
+
+**MUI theme (`src/theme.ts`)** — every MUI component overridden to match the design system. Buttons, cards, papers, tables, inputs, chips, dialogs, drawers, tooltips, menus, tabs, dividers, skeletons, alerts, badges, and backdrops all use tokens exclusively. No hardcoded colours anywhere.
+
+**TypeScript types (`src/types/index.ts`)** — complete type definitions for every backend Pydantic schema:
+- All enums (UserRole, ItemCriticality, SignOutStatus, ResupplyStatus, ResupplyPriority, NotificationCategory, NotificationPriority, NotificationType, ConditionState)
+- Brief and full variants (`ItemBrief` for lists, `ItemResponse` for detail)
+- Paginated wrappers for every collection
+- Stats response types for every dashboard
+- Sort field enums for query builders
+- Request/response types for all 100 endpoints
+
+**Tailwind config (`tailwind.config.ts`)** — extends Tailwind with the full token palette so layout utilities can reference design system values. Includes safelist for dynamically-generated classes.
+
+### Phase 3B — API Layer & State
+
+**API client (`src/api/client.ts`)** — Axios instance with:
+- JWT bearer token interceptor (reads from Zustand auth store)
+- Request ID injection
+- 401 auto-logout with clean Zustand reset
+- Centralised error message extractor (`getApiErrorMessage`, `getApiErrorStatus`)
+- 30-second default timeout
+
+**Typed API modules** — one file per backend router, all returning typed promises:
+
+| File | Endpoints |
+|---|---|
+| `api/auth.ts` | login, refresh, getMe, changePassword, updateProfile, updateNotificationPreferences, logout |
+| `api/items.ts` | list, get, create, update, delete, restore, stats, lowStock, adjustStock, transferCondition, exportCsv, listCategories, getCategoryTree |
+| `api/signouts.ts` | list, listMine, get, create, return, extend, approve, reject, declareLost, overdue, stats, exportCsv |
+| `api/resupply.ts` | list, listMine, get, create, review, approve, reject, order, fulfill, updateCost, updateNotes, cancel, stats, exportCsv |
+| `api/notifications.ts` | list, get, markRead, acknowledge, markAllRead, bulkDismiss, delete, unreadCount, adminListAll, adminStats, broadcast, clearExpired |
+| `api/users.ts` | list, get, create, update, changeRole, deactivate, reactivate, activity, stats, exportCsv |
+| `api/assistant.ts` | health, chat, listConversations, getConversation, deleteConversation, clearConversations, listModels, usage, queryInventorySummary, querySearchItems |
+
+**Zustand stores:**
+
+- **`store/authStore.ts`** — persisted JWT + user object, role check helpers (`isAdmin`, `canWrite`, `isViewer`), display helpers (`displayName`, `initials`, `roleLabel`), hydration state machine
+- **`store/themeStore.ts`** — accent colour preference (6 presets: blue, indigo, violet, slate, teal, emerald) persisted to localStorage and applied at app mount
+
+**Custom hooks:**
+
+- **`hooks/useAuth.ts`** — composes the auth store with TanStack Query mutations. Single hook exposes `user`, `login`, `logout`, `changePassword`, `updateProfile`, role checks, and hydration state.
+- **`hooks/useNotifications.ts`** — list query, unread badge poll, mark-read mutation, acknowledge mutation, bulk dismiss
+
+### Phase 3C — Layout & Shell
+
+**`AppShell`** — protected layout wrapper. Handles JWT hydration, redirects to `/login` if unauthenticated, shows the loading splash during hydration, mounts the sidebar + topbar, renders the routed page in the content area.
+
+**`Sidebar`** — 240px fixed-width navigation with collapsible 64px icon-only mode. Sections grouped by role (`NAVIGATION` for everyone, `ADMIN` for admins). Active route gets accent left border + muted accent background. User avatar pinned to bottom with rank and role chip.
+
+**`TopBar`** — sticky 64px header with breadcrumb trail, notification bell (with unread badge), and user menu (profile, settings, logout).
+
+**`NotificationBell`** — badge-counted icon that opens a 380px popover. Shows notifications grouped by category, marks individual or all as read, deep-links to related entities. Critical notifications require explicit acknowledgement before they can be dismissed.
+
+### Phase 3D — Common Components
+
+A library of reusable components every page is built from. All handle their own loading, empty, and error states.
+
+| Component | Purpose |
+|---|---|
+| **`StatCard`** | Dashboard statistic with monospace value, optional delta indicator, and icon. Border-only — no fills or shadows. |
+| **`StatusBadge`** | Lookup-driven badge for sign-out, resupply, and condition statuses. Uses semantic colour tokens. |
+| **`CriticalityBadge`** | Item criticality (routine → essential) with semantic colour mapping. |
+| **`PriorityBadge`** | Resupply/notification priority (low → emergency) with escalating colour intensity. |
+| **`DataRow`** | Key/value display row used in detail panels and drawers. Optional monospace mode for numeric values. |
+| **`EmptyState`** | Reusable empty state with icon, title, description, and optional CTA. Never leave a blank area. |
+| **`LoadingSkeleton`** | Table/card skeleton with wave animation. Used while queries are pending. |
+| **`FilterBar`** | Search input + filter chip row pattern reused across list pages. |
+| **`ConfirmDialog`** | Promise-based confirmation modal for destructive actions. |
+
+### Phase 3E — Pages
+
+All 17 pages built or rebuilt from scratch in Phase 3:
+
+| Page | Purpose |
+|---|---|
+| **`LoginPage`** | Branded sign-in with rate-limit handling, lockout messaging, and "Authenticate" panel layout |
+| **`ChangePasswordPage`** | Forced password change for accounts with `must_change_password=True` |
+| **`LandingPage`** | Post-login dashboard router (different default for admin vs user) |
+| **`InventoryPage`** | Responsive item grid with search, category filter, criticality filter, and pagination |
+| **`ItemDetailPage`** | Full item view with condition breakdown chart, location, sign-out history, low-stock indicator |
+| **`ItemCreatePage`** | Admin item creation with full Zod validation, all 30+ fields, category selector |
+| **`ItemEditPage`** | Admin item editor with stock adjustment workflow and condition transfer modal |
+| **`MySignoutsPage`** | User's active and historical sign-outs with status filter |
+| **`ResupplyPage`** | User's resupply requests with submit form and status tracking |
+| **`AdminPage`** | Admin dashboard with stat cards, Recharts visualisations, and tabbed activity feed |
+| **`AdminSignoutsPage`** | Full admin sign-out management table with approve/reject/return/declare-lost actions |
+| **`AdminResupplyPage`** | Full resupply lifecycle management table (review → approve → order → fulfill) |
+| **`UserManagementPage`** | Admin user CRUD with role changes, deactivation, reactivation, and activity drill-down |
+| **`NotificationManagementPage`** | Full notification list with filters, bulk actions, and acknowledgement workflow |
+| **`SettingsPage`** | Profile update, notification preferences, accent colour swatches, password change |
+| **`AssistantPage`** | Ollama chat interface with conversation history, streaming responses, and quick queries |
+| **`NotFoundPage`** | Styled 404 with mono error code and return-home action |
+
+### Forms (`src/components/signout`, `src/components/resupply`)
+
+- **`SignOutForm`** — modal for creating new sign-outs. Fields: full name, rank, task reference, expected return date, duration, optional notes. React Hook Form + Zod validation. Posts to `/api/signouts`.
+- **`ReturnForm`** — modal for returning equipment with per-condition quantity breakdown (serviceable, unserviceable, damaged, condemned). Validates total against outstanding quantity. Optional return notes and damage description.
+- **`ResupplyForm`** — modal for submitting resupply requests. Supports both existing items (item picker) and free-text new item requests. Quantity, justification, priority, and optional required-by date.
+
+### Frontend Code Quality Rules
+
+These are enforced across every Phase 3 file:
+
+1. **No `any` types** — every data shape has an interface or type
+2. **No inline hex strings** — all colours from `tokens` or MUI theme
+3. **No `!important` in sx props** — fix specificity properly
+4. **One component per file** (with optional small helpers under 50 lines)
+5. **All API calls through `src/api/`** — never `fetch()` or `axios` directly in a component
+6. **All forms use React Hook Form + Zod** — no `useState` form state
+7. **All data fetching uses TanStack Query** — no `useEffect` + `useState` data fetching
+8. **Loading states always handled** — render `<LoadingSkeleton>` while `isLoading`
+9. **Empty states always handled** — render `<EmptyState>` when data is empty
+10. **Error states always handled** — render `<Alert>` or error UI on query error
+11. **TypeScript strict mode on** — never suppress with `@ts-ignore`
+
+---
+
 ## Data Models (Phase 2 — Expanded)
 
 ### Category
@@ -440,139 +605,121 @@ g4lite/
 │   ├── alembic/
 │   │   ├── env.py
 │   │   └── versions/
-│   │       ├── 001_initial.py
-│   │       └── 002_phase2_expansion.py     ← NEW
+│   │       └── d5b90d4d3f29_initial_schema.py
 │   └── app/
 │       ├── main.py
 │       ├── config.py
 │       ├── database.py
 │       ├── seed.py
 │       ├── models/
-│       │   ├── __init__.py
-│       │   ├── user.py                     ← EXPANDED (3 roles, security, prefs)
-│       │   ├── category.py                 ← EXPANDED (hierarchy, slug, audit)
-│       │   ├── item.py                     ← EXPANDED (40+ fields, invariants)
-│       │   ├── signout.py                  ← EXPANDED (8 statuses, partial returns)
-│       │   ├── resupply.py                 ← EXPANDED (9 statuses, procurement)
-│       │   ├── notification.py             ← EXPANDED (14 types, 4 priorities)
-│       │   ├── access.py                   ← NEW (access codes + access logs)
-│       │   └── audit.py                    ← NEW (audit log entries)
-│       ├── schemas/                        ← TO BE EXPANDED (next session)
+│       │   ├── user.py
+│       │   ├── category.py
+│       │   ├── item.py
+│       │   ├── signout.py
+│       │   ├── resupply.py
+│       │   └── notification.py
+│       ├── schemas/
+│       │   ├── user.py
+│       │   ├── item.py
+│       │   ├── signout.py
+│       │   ├── resupply.py
+│       │   └── notification.py
 │       ├── routers/
-│       │   ├── __init__.py
-│       │   ├── auth.py                     ← EXPANDED (11 endpoints)
-│       │   ├── items.py                    ← EXPANDED (22 endpoints, cat + items)
-│       │   ├── signouts.py                 ← EXPANDED (14 endpoints)
-│       │   ├── resupply.py                 ← EXPANDED (16 endpoints)
-│       │   ├── notifications.py            ← EXPANDED (13 endpoints)
-│       │   ├── users.py                    ← EXPANDED (12 endpoints)
-│       │   ├── assistant.py                ← EXPANDED (12 endpoints)
-│       │   └── access.py                   ← NEW (planned — physical security)
-│       ├── services/                       ← TO BE EXPANDED (next session)
-│       └── utils/                          ← TO BE EXPANDED (next session)
+│       │   ├── auth.py
+│       │   ├── items.py
+│       │   ├── signouts.py
+│       │   ├── resupply.py
+│       │   ├── notifications.py
+│       │   ├── users.py
+│       │   └── assistant.py
+│       ├── services/
+│       │   ├── notification_service.py
+│       │   └── ollama_service.py
+│       └── utils/
+│           └── security.py
 │
-├── frontend/                               ← Phase 2 rebuild after backend
+├── frontend/                                ← Phase 3 rebuild
+│   ├── Dockerfile
+│   ├── Dockerfile.dev
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── tsconfig.node.json
+│   ├── tailwind.config.ts
+│   ├── postcss.config.js
+│   ├── vite.config.ts
+│   ├── index.html
+│   ├── public/
+│   │   └── fonts/                           ← Self-hosted Montserrat + JetBrains Mono
 │   └── src/
-│       ├── tokens.ts
-│       ├── theme.ts
-│       └── ...
+│       ├── main.tsx
+│       ├── App.tsx
+│       ├── index.css
+│       ├── tokens.ts                        ← Phase 3A — design tokens
+│       ├── theme.ts                         ← Phase 3A — MUI theme
+│       ├── types/
+│       │   └── index.ts                     ← Phase 3A — backend type mirrors
+│       ├── api/
+│       │   ├── client.ts                    ← Phase 3B — Axios + interceptors
+│       │   ├── auth.ts
+│       │   ├── items.ts
+│       │   ├── signouts.ts
+│       │   ├── resupply.ts
+│       │   ├── notifications.ts
+│       │   ├── users.ts
+│       │   └── assistant.ts
+│       ├── store/
+│       │   ├── authStore.ts                 ← Phase 3B — JWT + user
+│       │   └── themeStore.ts                ← Phase 3B — accent colour
+│       ├── hooks/
+│       │   ├── useAuth.ts
+│       │   └── useNotifications.ts
+│       ├── components/
+│       │   ├── common/                      ← Phase 3D — shared library
+│       │   │   ├── StatCard.tsx
+│       │   │   ├── StatusBadge.tsx
+│       │   │   ├── CriticalityBadge.tsx
+│       │   │   ├── PriorityBadge.tsx
+│       │   │   ├── DataRow.tsx
+│       │   │   ├── EmptyState.tsx
+│       │   │   ├── LoadingSkeleton.tsx
+│       │   │   ├── FilterBar.tsx
+│       │   │   └── ConfirmDialog.tsx
+│       │   ├── layout/                      ← Phase 3C — shell
+│       │   │   ├── AppShell.tsx
+│       │   │   ├── Sidebar.tsx
+│       │   │   ├── TopBar.tsx
+│       │   │   └── NotificationBell.tsx
+│       │   ├── inventory/
+│       │   │   ├── ItemCard.tsx
+│       │   │   └── ItemDetailDrawer.tsx
+│       │   ├── signout/
+│       │   │   ├── SignOutForm.tsx
+│       │   │   └── ReturnForm.tsx
+│       │   └── resupply/
+│       │       └── ResupplyForm.tsx
+│       └── pages/                           ← Phase 3E — 17 pages
+│           ├── LoginPage.tsx
+│           ├── Changepasswordpage.tsx
+│           ├── LandingPage.tsx
+│           ├── InventoryPage.tsx
+│           ├── ItemDetailPage.tsx
+│           ├── ItemCreatePage.tsx
+│           ├── ItemEditPage.tsx
+│           ├── MySignoutsPage.tsx
+│           ├── ResupplyPage.tsx
+│           ├── AdminPage.tsx
+│           ├── AdminSignoutsPage.tsx
+│           ├── AdminResupplyPage.tsx
+│           ├── UserManagementPage.tsx
+│           ├── NotificationManagementPage.tsx
+│           ├── SettingsPage.tsx
+│           ├── AssistantPage.tsx
+│           └── NotFoundPage.tsx
 │
 └── nginx/
-    └── nginx.conf
+    ├── nginx.conf
+    └── nginx.dev.conf
 ```
-
----
-
-All **models** (6 files) and all **routers** (7 files) have been expanded to production grade. The routers currently define their schemas inline — these need to be extracted to the schemas directory.
-
-#### 1. Schemas Directory — Extract & Align
-
-The expanded routers define Pydantic schemas inline. These must be extracted into the schemas directory to match the project's separation-of-concerns architecture:
-
-| File | Contents |
-|---|---|
-| `schemas/user.py` | `LoginRequest`, `TokenResponse`, `UserResponse`, `UserCreate`, `UserUpdate`, `UserDetailResponse`, `RoleChange`, `DeactivationRequest`, `ProfileUpdateRequest`, `PasswordChangeRequest`, `AdminPasswordResetRequest`, `NotificationPreferencesRequest/Response`, `AuthStatusResponse`, `PaginatedUsers`, `UserStats`, `UserActivity`, `UserSortField` |
-| `schemas/item.py` | `ItemCreate`, `ItemUpdate`, `ItemResponse`, `PaginatedItems`, `StockAdjustment`, `ConditionTransfer`, `ItemStats`, `LowStockItem`, `CategoryCreate`, `CategoryUpdate`, `CategoryResponse`, `CategoryTreeNode`, `ItemSortField` |
-| `schemas/signout.py` | `SignOutCreate`, `ReturnRequest`, `ExtensionRequest`, `ApprovalRequest`, `RejectionRequest`, `LossDeclaration`, `SignOutResponse`, `PaginatedSignOuts`, `SignOutStats`, `SignOutSortField` |
-| `schemas/resupply.py` | `ResupplyCreate`, `ResupplyApproval`, `ResupplyRejection`, `ResupplyOrderDetails`, `ResupplyFulfillment`, `ResupplyCostUpdate`, `ResupplyAdminNotes`, `ResupplyCancellation`, `ResupplyResponse`, `PaginatedResupply`, `ResupplyStats`, `ResupplySortField` |
-| `schemas/notification.py` | `NotificationResponse`, `PaginatedNotifications`, `UnreadCounts`, `BulkDismissRequest`, `BroadcastRequest`, `NotificationStats` |
-| `schemas/assistant.py` | `ChatRequest`, `ChatResponse`, `ConversationMessage`, `ConversationSummary`, `ConversationDetail`, `HealthResponse`, `ModelInfo`, `UsageStats` |
-
-#### 2. Services Directory — Expand
-
-| File | Current State | Expansion Needed |
-|---|---|---|
-| `services/notification_service.py` | Creates basic notifications | Add: `notify_resupply_status_change()`, `notify_low_stock()`, `notify_access_granted/denied()`, `notify_overdue()`, `notify_return_ok()`, `notify_return_condemned()`. Use `NOTIFICATION_TYPE_CATEGORY` and `NOTIFICATION_TYPE_DEFAULT_PRIORITY` from the model for auto-population. Respect user notification preferences (`notify_in_app`, `notify_overdue`, etc.) |
-| `services/ollama_service.py` | Basic chat + health | Add: `chat_with_ollama_stream()` (async generator for SSE), `list_ollama_models()`, `OllamaError` exception class. Current `chat_with_ollama()` should accept full message list (not just string + history). |
-| `services/access_service.py` | Does not exist | Create: PIN generation, PIN validation, lock API integration (ESP32/Nuki/mock), access log recording. Environment-variable-driven lock type selection. |
-| `services/audit_service.py` | Does not exist | Create: Generic audit log recording for all mutations. Captures user_id, action, entity_type, entity_id, before/after JSON diff, IP address, timestamp. |
-| `services/overdue_service.py` | Does not exist | Create: Scheduled task (or on-demand endpoint) that scans active sign-outs past expected_return_date, transitions status to `overdue`, sends notifications (respecting `overdue_notified_at` to prevent duplicates), and escalates after 48 hours (checking `overdue_escalated_at`). |
-| `services/export_service.py` | Does not exist | Create: Shared CSV generation logic. WeasyPrint PDF generation for resupply demand forms and sign-out receipts. |
-
-#### 3. Utils Directory — Expand
-
-| File | Current State | Expansion Needed |
-|---|---|---|
-| `utils/security.py` | JWT create/verify, password hash, `get_current_user`, `require_admin` | Add: `hash_password()` export (currently only in `create_user`), `require_viewer_or_above` dependency, rate limiting decorator, input sanitisation helpers |
-
-#### 4. Config — Expand
-
-`config.py` needs new settings for:
-
-```python
-# Access control
-LOCK_ENABLED: bool = False
-LOCK_TYPE: str = "mock"
-LOCK_API_URL: str = ""
-LOCK_API_KEY: str = ""
-LOCK_TIMEOUT_SECONDS: int = 30
-ACCESS_PIN_VALIDITY_MINUTES: int = 15
-ACCESS_PIN_LENGTH: int = 6
-
-# Security
-MAX_FAILED_LOGIN_ATTEMPTS: int = 8
-PASSWORD_MIN_LENGTH: int = 8
-PASSWORD_MAX_AGE_DAYS: int = 90
-
-# Notifications
-NOTIFICATION_POLL_INTERVAL_SECONDS: int = 30
-OVERDUE_CHECK_INTERVAL_MINUTES: int = 60
-OVERDUE_ESCALATION_HOURS: int = 48
-```
-
-#### 5. Database — Expand
-
-`database.py` currently provides the async engine and session factory. Needs:
-- Connection pool tuning for production (`pool_size`, `max_overflow`)
-- Health check query function
-- Optional: middleware for `last_active_at` throttled updates
-
-#### 6. Seed Script — Expand
-
-`seed.py` currently seeds 7 users, 4 categories, 15 items. Phase 2 expansion:
-- **50+ items** with full descriptions, item codes, manufacturers, model numbers, storage locations, condition breakdowns, criticality levels, min stock thresholds
-- **Subcategories** using the new hierarchy (e.g. Computing → Single-Board Computers, Storage Devices)
-- **Category codes and icons** (COMP, COMMS, PWR, ACC with matching MUI icon names)
-- **Realistic stock levels** with some items low-stock and some with mixed conditions
-- See the Phase 2 Handover Document §5 "Expanded Equipment Catalogue" for the full target list
-
-#### 7. New Models — Create
-
-| File | Purpose |
-|---|---|
-| `models/access.py` | `AccessCode` (one-time PINs for cage entry) + `AccessLog` (entry/exit/denied events). See Phase 2 Handover §4. |
-| `models/audit.py` | `AuditEntry` — generic audit log for all mutations. Fields: `user_id`, `action` (create/update/delete/login/etc.), `entity_type`, `entity_id`, `changes_json`, `ip_address`, `timestamp`. |
-
-#### 8. Alembic Migration
-
-A new migration `002_phase2_expansion.py` is required to:
-- Add all new columns to existing tables (with sensible defaults for existing rows)
-- Add new tables (access_codes, access_logs, audit_entries)
-- Add new constraints and indexes
-- Handle the `is_deleted → is_active` rename on items (invert existing boolean values)
-- Add `slug` columns with auto-generation for existing rows
-- Add `item_code` column with auto-generation for existing items (e.g. derive from name)
-- Add `signout_ref` / `request_number` for existing records
 
 ---
 
@@ -638,6 +785,25 @@ cd frontend
 npm install
 npm run dev
 ```
+
+---
+
+## Roadmap
+
+### Completed
+- ✅ **Phase 1** — Foundation scaffold, Docker Compose, basic CRUD, login flow
+- ✅ **Phase 2A** — Models, routers, schemas, services expanded to production grade
+- ✅ **Phase 2B** — Infrastructure (config, database, main, security, seed, Alembic, Dockerfile, Compose, Nginx)
+- ✅ **Phase 3A** — Frontend foundation (tokens, theme, types, Tailwind config)
+- ✅ **Phase 3B** — Frontend API layer & state (Axios client, 7 typed API modules, Zustand stores, hooks)
+- ✅ **Phase 3C** — Frontend layout (AppShell, Sidebar, TopBar, NotificationBell)
+- ✅ **Phase 3D** — Frontend common components (9 reusable components)
+- ✅ **Phase 3E** — Frontend pages (17 pages built or rebuilt)
+
+### Planned
+- 🔜 **Phase 4** — Physical access control (ESP32/Nuki integration, PIN generation, cage entry/exit logging)
+- 🔜 **Phase 5** — Audit log service, WeasyPrint PDF exports, scheduled overdue scanner
+- 🔜 **Phase 6** — Mobile-responsive layout polish, keyboard shortcut palette, command bar
 
 ---
 
