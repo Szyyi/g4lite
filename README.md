@@ -3,6 +3,8 @@
 </p>
 
 <h1 align="center">G4Lite</h1>
+<img width="1279" height="692" alt="Pic 1 " src="https://github.com/user-attachments/assets/186bbb59-7e2d-4c92-aa3d-7b5d06e4cc9a" />
+
 
 <p align="center">
   <strong>C2-grade self-hosted equipment logistics platform</strong><br/>
@@ -820,5 +822,26 @@ npm run dev
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+## Appendicies
+
+<img width="1278" height="689" alt="Pic 2 " src="https://github.com/user-attachments/assets/c2f406d9-cf09-430f-beb9-901d722f4d87" />
+
+<img width="1276" height="693" alt="Pic 3" src="https://github.com/user-attachments/assets/9a60020e-0454-4be2-92e8-ed7b9676d489" />
+
+<img width="1275" height="699" alt="Pic 4 " src="https://github.com/user-attachments/assets/ae79f699-dfa0-43ec-9293-994fe11c7885" />
+
+<img width="1276" height="689" alt="Pic 5 " src="https://github.com/user-attachments/assets/a15491dd-9d69-4b7c-808f-48573d51098d" />
+
+<img width="1276" height="698" alt="Pic 6 " src="https://github.com/user-attachments/assets/d7f98738-471d-48c7-a7cd-a7fb37e02031" />
+
+<img width="1271" height="674" alt="Pic 7 " src="https://github.com/user-attachments/assets/3e1546b8-c0ec-46fa-b39f-a548879831b7" />
+
+<img width="1276" height="694" alt="Pic 8 " src="https://github.com/user-attachments/assets/99600931-71cd-40c7-a9c3-5b96dda7b4f0" />
+
+
+
+
+
 
 ---
